@@ -5,7 +5,7 @@ A very very simple DNS server for development/testing purposes. (For example if 
 ## Build
 
 ```bash
-# Will build on linux, windows and Mac (Apple chip)
+# Will build for linux, windows and Mac (Apple chip)
 bash build.sh
 ```
 
