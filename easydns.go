@@ -25,15 +25,30 @@ type Record struct {
 type Records map[string]Record
 
 // Config holds the DNS server configuration
+
+type ForwardingConfig struct {
+	Enabled bool     `json:"enabled"`
+	Servers []string `json:"servers"`
+}
+type ServerConfig struct {
+	BindAddress string `json:"bind_address"`
+	Port        string `json:"port"`
+}
 type Config struct {
-	UpstreamServers []string `json:"upstream_servers"`
-	Port            string   `json:"port"`
-	Records         Records  `json:"records"`
+	Forwarding ForwardingConfig `json:"forwarding"`
+	Server     ServerConfig     `json:"server"`
+	Records    Records          `json:"records"`
 }
 
 var DefaultConfig = Config{
-	UpstreamServers: []string{"8.8.8.8:53", "8.8.4.4:53"},
-	Port:            "53",
+	Forwarding: ForwardingConfig{
+		Enabled: true,
+		Servers: []string{"8.8.8.8:53", "8.8.4.4:53"},
+	},
+	Server: ServerConfig{
+		BindAddress: "",
+		Port:        "53",
+	},
 	Records: Records{
 		"test.com": {
 			Type:  "A",
@@ -123,13 +138,15 @@ func handleDNSRequest(records Records) dns.HandlerFunc {
 					log.Printf("Failed to create RR: %v", err)
 				}
 			} else {
-				// Request from upstream servers
-				upstreamResponse, err := requestFromUpsreamServers(r, config.UpstreamServers)
-				if err != nil {
-					log.Println(err)
-					continue
+				if config.Forwarding.Enabled {
+					// Request from upstream servers
+					upstreamResponse, err := requestFromUpsreamServers(r, config.Forwarding.Servers)
+					if err != nil {
+						log.Println(err)
+						continue
+					}
+					msg.Answer = append(msg.Answer, upstreamResponse.Answer...)
 				}
-				msg.Answer = append(msg.Answer, upstreamResponse.Answer...)
 			}
 		}
 		w.WriteMsg(&msg)
@@ -212,8 +229,10 @@ func main() {
 
 	dns.HandleFunc(".", handleDNSRequest(config.Records))
 
-	server := &dns.Server{Addr: ":" + config.Port, Net: "udp"}
-	log.Printf("starting DNS server on port %s", config.Port)
+	addr := strings.Join([]string{config.Server.BindAddress, config.Server.Port}, ":")
+
+	server := &dns.Server{Addr: addr, Net: "udp"}
+	log.Printf("starting DNS server on port %s", config.Server.Port)
 	err = server.ListenAndServe()
 	if err != nil {
 		log.Fatalf("failed to start server: %v", err)
