@@ -26,12 +26,14 @@ type Records map[string]Record
 
 // Config holds the DNS server configuration
 type Config struct {
-	Port    string  `json:"port"`
-	Records Records `json:"records"`
+	UpstreamServers []string `json:"upstream_servers"`
+	Port            string   `json:"port"`
+	Records         Records  `json:"records"`
 }
 
 var DefaultConfig = Config{
-	Port: "53",
+	UpstreamServers: []string{"8.8.8.8:53", "8.8.4.4:53"},
+	Port:            "53",
 	Records: Records{
 		"test.com": {
 			Type:  "A",
@@ -81,10 +83,21 @@ func LoadConfig(filename string) (*Config, error) {
 	return &config, nil
 }
 
+func requestFromUpsreamServers(r *dns.Msg, upstreamServers []string) (*dns.Msg, error) {
+	c := new(dns.Client)
+	c.Net = "udp"
+	for _, server := range upstreamServers {
+		resp, _, err := c.Exchange(r, server)
+		if err == nil {
+			return resp, nil
+		}
+	}
+	return nil, fmt.Errorf("failed to get response from upstream servers")
+}
+
 // handleDNSRequest handles incoming DNS queries
 func handleDNSRequest(records Records) dns.HandlerFunc {
 	return func(w dns.ResponseWriter, r *dns.Msg) {
-		log.Printf("query: %s, from: %s", r.Question[0].Name, w.RemoteAddr())
 		msg := dns.Msg{}
 		msg.SetReply(r)
 		for _, q := range r.Question {
@@ -109,9 +122,18 @@ func handleDNSRequest(records Records) dns.HandlerFunc {
 				} else {
 					log.Printf("Failed to create RR: %v", err)
 				}
+			} else {
+				// Request from upstream servers
+				upstreamResponse, err := requestFromUpsreamServers(r, config.UpstreamServers)
+				if err != nil {
+					log.Println(err)
+					continue
+				}
+				msg.Answer = append(msg.Answer, upstreamResponse.Answer...)
 			}
 		}
 		w.WriteMsg(&msg)
+		log.Printf("query: %s from: %s", r.Question[0].Name, w.RemoteAddr())
 	}
 }
 
